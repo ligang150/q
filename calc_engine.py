@@ -114,14 +114,26 @@ def parse_cell_value(cell_value):
     return ""
 
 
+class AuthError(Exception):
+    """腾讯API认证错误"""
+    pass
+
+
 def read_sheet_range(sheet_id, range_str, file_id=None):
     fid = file_id if file_id else FILE_ID
     url = f"{BASE_URL}/files/{fid}/{sheet_id}/{range_str}"
     resp = HTTP.get(url, headers=get_headers(), timeout=12)
     if resp.status_code == 200:
         data = resp.json()
+        # 腾讯API可能在HTTP 200中返回业务错误码
+        if "code" in data and data["code"] != 0:
+            msg = data.get("message", "")
+            if "Authentication" in msg or data["code"] == 400006:
+                raise AuthError(f"腾讯API认证失败(Token可能已过期): {msg}")
+            print(f"[WARN] 腾讯API业务错误: code={data['code']} msg={msg}", flush=True)
+            return {}
         return data.get("gridData", {})
-    print(f"[WARN] read_sheet_range failed: {resp.status_code} {range_str} {resp.text[:200]}", flush=True)
+    print(f"[WARN] read_sheet_range HTTP失败: {resp.status_code} {range_str} {resp.text[:200]}", flush=True)
     return {}
 
 
@@ -411,7 +423,11 @@ def calculate_delivery_date(model, tonnage_str, expected_date_str, occupied_capa
 
     sheet_id, start_row, capacity_col, limit_cell, row_count = config
 
-    sheet_data = get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count)
+    try:
+        sheet_data = get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count)
+    except AuthError as e:
+        return "请联系管理员", str(e)
+
     date_capacity_map = sheet_data["date_capacity_map"]
     limit_date = sheet_data["limit_date"]
 
