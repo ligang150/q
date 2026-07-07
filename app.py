@@ -523,9 +523,9 @@ def get_next_empty_row(sheet_id, start_from=2, max_batches=6):
 
     return start_from
 def _find_first_empty_row_in_column_a():
-    """原子分配新行号。基于全局递增计数器，每个请求获得唯一行号。
-    分配结果由计数器保证正确性，无需读 API 验证（初始化时已并行扫描过最大行号）。"""
-    return _allocate_row()
+    """扫描A列找到第一个空行（A列为空即空行）。
+    从第2行开始逐批扫描，确保写入第一个真正的空行，避免覆盖前期数据。"""
+    return get_next_empty_row(SHEET_ID, start_from=2, max_batches=50)
 
 
 def batch_update(requests_body):
@@ -1299,7 +1299,7 @@ def cleanup_user_temp_rows():
 @require_auth
 def create_order():
     """创建订单：完整写入记录，不覆盖E列公式
-    提交时实时扫描A列找到真正的空行，避免多人并发时覆盖已有数据"""
+    提交时扫描A列找到第一个空行（A列为空即空行），写入前严格验证，避免覆盖已有数据"""
     try:
         data = request.json
         model = data.get('model', '')
@@ -1313,17 +1313,34 @@ def create_order():
         remark = f"{tonnage}{customer}"
         submit_time = get_beijing_time_str()
 
-        # 原子分配唯一行号
-        target_row = _find_first_empty_row_in_column_a()
+        # 扫描找第一个空行 + 验证，最多重试3次（应对并发场景）
+        target_row = 0
+        scan_start = 2
+        max_retries = 3
+        for attempt in range(max_retries):
+            # 从scan_start开始扫描A列，找到第一个空行
+            candidate_row = get_next_empty_row(SHEET_ID, start_from=scan_start, max_batches=50)
+            if candidate_row < 2:
+                candidate_row = 2
 
-        # 确保行数足够（尽力扩容，静默失败时由写入本身报错）
-        ensure_sheet_rows(target_row + 10)
+            # 确保行数足够
+            ensure_sheet_rows(candidate_row + 10)
 
-        # 写入前验证目标行为空（兜底 API 压缩漏检的空白行）
-        verify_val = read_single_cell(SHEET_ID, f"A{target_row}")
-        if verify_val and verify_val.strip():
-            target_row = _find_first_empty_row_in_column_a()
-            ensure_sheet_rows(target_row + 10)
+            # 写入前验证：目标行A列必须为空
+            verify_val = read_single_cell(SHEET_ID, f"A{candidate_row}")
+            if verify_val and verify_val.strip():
+                # 该行A列有值，说明被并发占用或扫描有偏差，从下一行继续找
+                print(f"[create_order] 第{attempt+1}次尝试：行{candidate_row} A列有值（{verify_val}），继续往下找...", flush=True)
+                scan_start = candidate_row + 1
+                continue
+
+            # 验证通过
+            target_row = candidate_row
+            print(f"[create_order] 找到空行：行{target_row}（第{attempt+1}次尝试）", flush=True)
+            break
+
+        if target_row == 0:
+            return jsonify({"success": False, "error": "未能找到可用空行，请稍后重试"})
 
         # 写入完整数据（不覆盖E列）
         write_row_idx = target_row - 1
@@ -1342,6 +1359,9 @@ def create_order():
                 with _temp_row_lock:
                     if temp_key in _temp_row_tracker:
                         del _temp_row_tracker[temp_key]
+                # 清空缓存，让下一次扫描重新计算
+                global _empty_row_cache
+                _empty_row_cache = {"row": 0, "timestamp": 0}
                 clear_order_caches()
                 return jsonify({"success": True, "message": "订单创建成功", "row": target_row})
             return jsonify({"success": False, "error": "写入0个单元格"})
