@@ -1861,10 +1861,6 @@ def update_order(row_index):
             original_tonnage_str=original_tonnage if has_original_queue else None
         )
 
-        # 可发货日期为"请联系商务支持"时禁止保存
-        if calc_date_for_update and calc_date_for_update == "请联系商务支持":
-            return jsonify({"success": False, "error": "可发货日期：请联系商务支持，无法保存修改"})
-
         # 验证排队日期 >= 可发货日期
         if calc_date_for_update and is_date_string(calc_date_for_update) and queue_date and is_date_string(queue_date):
             from datetime import datetime
