@@ -481,13 +481,20 @@ body {
 
 .filter-bar {
     display: flex;
+    flex-wrap: wrap;
     gap: 12px;
     margin-bottom: 20px;
+}
+
+/* 桌面端管理员筛选按钮独占一行，筛选控件排第二行，避免排序框溢出 */
+.filter-bar > .admin-filter {
+    flex: 1 1 100%;
 }
 
 .filter-bar input,
 .filter-bar select {
     flex: 1;
+    min-width: 0;
     padding: 10px;
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -891,7 +898,27 @@ body {
         font-size: 14px;
     }
     
-    /* 排队明细手机端筛选区：按目标图改成两行网格 */
+    /* 排队明细筛选区两行网格：已移至 max-width: 768px 媒体查询统一处理 */
+    
+    .order-table {
+        font-size: 14px;
+    }
+    
+    .order-table th,
+    .order-table td {
+        padding: 8px 4px;
+    }
+    
+    .btn-edit,
+    .btn-copy,
+    .btn-delete {
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+}
+
+/* 排队明细筛选区：手机/平板统一两行网格，避免默认排序框超出边界 */
+@media (max-width: 768px) {
     #listTab {
         padding: 0;
     }
@@ -933,6 +960,7 @@ body {
         color: #333;
     }
 
+    /* 第一行：三个排队视图按钮 */
     #listTab #adminFilter button {
         grid-column: span 2;
     }
@@ -945,19 +973,24 @@ body {
         order: 2;
     }
 
-    #listTab #sortSelect {
-        grid-column: span 2;
+    #listTab #adminFilter button:nth-child(3) {
         order: 3;
     }
 
-    #listTab #filterModel {
-        grid-column: span 3;
+    /* 第二行：排序 + 型号 + 客户 */
+    #listTab #sortSelect {
+        grid-column: span 2;
         order: 4;
     }
 
-    #listTab #filterCustomer {
-        grid-column: span 3;
+    #listTab #filterModel {
+        grid-column: span 2;
         order: 5;
+    }
+
+    #listTab #filterCustomer {
+        grid-column: span 2;
+        order: 6;
     }
 
     #listTab #adminFilter button.active {
@@ -970,22 +1003,6 @@ body {
     #listTab .pagination-container {
         padding-left: 16px;
         padding-right: 16px;
-    }
-    
-    .order-table {
-        font-size: 14px;
-    }
-    
-    .order-table th,
-    .order-table td {
-        padding: 8px 4px;
-    }
-    
-    .btn-edit,
-    .btn-copy,
-    .btn-delete {
-        padding: 4px 8px;
-        font-size: 11px;
     }
 }
 
