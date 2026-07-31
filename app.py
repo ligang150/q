@@ -28,6 +28,10 @@ MODEL_SHEET_ID = "fkayvi"            # 牌号表格
 USER_FILE_ID = "DRmxUY0RBQVJXRXpC"
 USER_SHEET_ID = "s9osf8"
 
+# 包装下拉选项表格（新表格，qeyugg sheet 的 A 列）
+PACKAGING_FILE_ID = "DRmxUY0RBQVJXRXpC"
+PACKAGING_SHEET_ID = "qeyugg"
+
 # 服务端配置（用于API调用）
 CLIENT_ID = os.environ.get('CLIENT_ID', 'da815d1227294457b43413bdc16e3e90')
 ACCESS_TOKEN = os.environ.get('ACCESS_TOKEN', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbHQiOiJkYTgxNWQxMjI3Mjk0NDU3YjQzNDEzYmRjMTZlM2U5MCIsInR5cCI6MSwiZXhwIjoxNzgyMDk0NTcyLjEwODc1MywiaWF0IjoxNzc5NTAyNTcyLjEwODc1Mywic3ViIjoiOWJjMTcyZTUzMzgxNDdkOGEzNWMxNDM4ZWE4ZDE1NzcifQ.rm3BIdD1V7FrCwdToT2arErs06xWF7hTqAh0KsCKsdw')
@@ -64,6 +68,7 @@ MODEL_CACHE_TTL = 300
 
 _users_cache = {"data": None, "timestamp": 0}
 _models_cache = {"data": None, "timestamp": 0}
+_packaging_cache = {"data": None, "timestamp": 0}
 _admin_secret_cache = {"data": {}, "timestamp": 0}
 
 
@@ -791,10 +796,10 @@ def clear_temp_row(row_index_1based):
     return batch_update(body)
 
 
-def write_order_row(row_index_0based, model, tonnage, customer, expected_date, calculated_date, queue_date, submitter, remark, serial_no, submitter_id, submit_time):
+def write_order_row(row_index_0based, model, tonnage, customer, expected_date, calculated_date, queue_date, submitter, remark, serial_no, submitter_id, submit_time, packaging=""):
     """写入一行完整订单数据到腾讯表格（row_index_0based从0开始）
     E列（可发货日期）由腾讯表格公式计算，不覆盖
-    使用updateRangeRequest写入A-D列，然后单独写入F-L列
+    使用updateRangeRequest写入A-D列，然后单独写入F-N列
     """
     queue_date_is_date = is_date_string(queue_date)
 
@@ -835,6 +840,22 @@ def write_order_row(row_index_0based, model, tonnage, customer, expected_date, c
                         build_cell_value(""),                            # J: 上次录入
                         build_cell_value(submitter_id),                  # K: 提交人ID
                         build_cell_value(submit_time),                   # L: 提交时间
+                    ]
+                }]
+            }
+        }
+    })
+
+    # 3. 写入N列（包装），M列（首次录入吨位）不覆盖
+    requests.append({
+        "updateRangeRequest": {
+            "sheetId": SHEET_ID,
+            "gridData": {
+                "startRow": row_index_0based,
+                "startColumn": 13,  # N列
+                "rows": [{
+                    "values": [
+                        build_cell_value(packaging),                    # N: 包装
                     ]
                 }]
             }
@@ -894,6 +915,32 @@ def delete_row(row_index_1based):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/api/packaging', methods=['GET'])
+@require_auth
+def get_packaging_options():
+    """获取包装下拉选项（从 qeyugg sheet 的 A 列读取）"""
+    try:
+        now = time.time()
+        if _packaging_cache["data"] is not None and (now - _packaging_cache["timestamp"]) < MODEL_CACHE_TTL:
+            return jsonify({"success": True, "packaging": _packaging_cache["data"]})
+
+        grid_data = read_sheet_range(PACKAGING_SHEET_ID, "A1:A200", file_id=PACKAGING_FILE_ID)
+        rows = grid_data.get("rows", [])
+        packaging = []
+        for row in rows:
+            for v in row.get("values", []):
+                cv = v.get("cellValue")
+                if cv:
+                    text = parse_cell_value(cv)
+                    if text:
+                        packaging.append(text)
+        _packaging_cache["data"] = packaging
+        _packaging_cache["timestamp"] = now
+        return jsonify({"success": True, "packaging": packaging, "version": "v2.2"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 
 @app.route('/api/models', methods=['GET'])
@@ -1314,6 +1361,10 @@ def create_order():
         queue_date = data.get('queue_date', '')
         submitter = data.get('submitter', '未知用户')
         submitter_id = data.get('submitter_id', '')
+        packaging = data.get('packaging', '')
+
+        if not packaging or not packaging.strip():
+            return jsonify({"success": False, "error": "请选择包装"})
 
         remark = f"{tonnage}{customer}"
         submit_time = get_beijing_time_str()
@@ -1352,7 +1403,7 @@ def create_order():
         serial_no = str(target_row)
         resp = write_order_row(
             write_row_idx, model, tonnage, customer, expected_date,
-            "", queue_date, submitter, remark, serial_no, submitter_id, submit_time
+            "", queue_date, submitter, remark, serial_no, submitter_id, submit_time, packaging
         )
         result = resp.json()
 
@@ -1478,7 +1529,7 @@ def fetch_all_orders_raw():
         # 不缓存空结果，避免空数组污染缓存
         return []
 
-    # Step 2: 并行读取有数据的范围（A2:Llast_data_row），每批200行
+    # Step 2: 并行读取有数据的范围（A2:Nlast_data_row），每批200行
     all_rows_by_offset = {}
     data_ranges = []
     batch_size = 200
@@ -1488,7 +1539,7 @@ def fetch_all_orders_raw():
         data_ranges.append((offset, start, end))
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(_read_batch, SHEET_ID, f"A{s}:L{e}"): (offset, s, e) for offset, s, e in data_ranges}
+        futures = {executor.submit(_read_batch, SHEET_ID, f"A{s}:N{e}"): (offset, s, e) for offset, s, e in data_ranges}
         for future in as_completed(futures):
             grid_data = future.result()
             rows = grid_data.get("rows", [])
@@ -1519,7 +1570,7 @@ def fetch_all_orders_raw():
                         return parse_cell_value(cv)
                 return ""
 
-            row_data = [get_col(j) for j in range(12)]
+            row_data = [get_col(j) for j in range(14)]
             if not row_data[0]:
                 continue
 
@@ -1540,7 +1591,9 @@ def fetch_all_orders_raw():
                 "serial_no": row_data[8],
                 "last_entry": row_data[9],
                 "submitter_id": row_data[10],
-                "submit_time": row_data[11]
+                "submit_time": row_data[11],
+                "first_tonnage": row_data[12],
+                "packaging": row_data[13]
             })
 
     # 如果解析结果为空但有缓存数据，使用缓存（降级）
@@ -1632,16 +1685,19 @@ def can_operate_order(order, current_user, submitter_id, submitter_name, view_mo
 
 
 def normalize_view_mode(current_user, requested_view_mode):
-    """根据权限标准化视图：管理员全部，经理本部门，业务员本部门（隐藏客户）"""
+    """根据权限标准化视图：管理员全部，经理本部门，业务员本部门（隐藏客户）
+    mine/all/history 三种视图；history=历史排队（权限内所有排队，禁止修改删除）"""
     access_level = (current_user or {}).get("access_level", "self")
-    if requested_view_mode == "all":
+    if requested_view_mode in ("all", "history"):
         # 管理员、经理、业务员都可以看全部排队（业务员隐藏客户名称在前端处理）
-        return "all"
+        return requested_view_mode
     return "mine"
 
 
 def get_filtered_orders(submitter_id, current_user, view_mode, submitter_name=""):
-    """获取过滤+排序后的订单列表，带缓存"""
+    """获取过滤+排序后的订单列表，带缓存
+    view_mode: mine=我的排队 all=全部排队 history=历史排队
+    history 显示权限内的所有排队（不过滤日期），禁止修改、删除"""
     now = datetime.now().timestamp()
     submitter_name = resolve_submitter_name(submitter_id, submitter_name)
     access_level = (current_user or {}).get("access_level", "self")
@@ -1657,20 +1713,27 @@ def get_filtered_orders(submitter_id, current_user, view_mode, submitter_name=""
     # 读取原始数据
     all_orders = fetch_all_orders_raw()
     today = datetime.now().date()
+    yesterday = today - timedelta(days=1)
 
     # 过滤
     orders = []
     for order in all_orders:
-        # 权限过滤：管理员全部、经理本部门、业务员本人
-        if not can_operate_order(order, current_user, submitter_id, submitter_name, view_mode):
+        # 权限过滤：管理员全部、经理本部门、业务员本人（历史排队与全部排队权限一致）
+        perm_view = "all" if view_mode in ("all", "history") else view_mode
+        if not can_operate_order(order, current_user, submitter_id, submitter_name, perm_view):
             continue
 
-        # 日期过滤：期望发货日期>=今天 或 排队日期>=今天 的订单才显示
-        # 原因：即使期望发货日期已过，如果排队日期还在未来，说明订单仍在排队中
+        # 历史排队：显示权限内的所有排队（含已过期），不按日期过滤
+        if view_mode == "history":
+            orders.append(order)
+            continue
+
+        # 日期过滤：期望发货日期>=今天 或 排队日期>=昨天 的订单才显示
+        # 原因：即使期望发货日期已过，如果排队日期还在昨天及以后，说明订单仍在排队中
         expected_date_str = order.get("expected_date", "")
         queue_date_str = order.get("queue_date", "")
         expected_date_passed = False
-        has_future_queue_date = False
+        has_recent_queue_date = False
 
         # 检查期望发货日期是否已过期
         if expected_date_str:
@@ -1681,17 +1744,17 @@ def get_filtered_orders(submitter_id, current_user, view_mode, submitter_name=""
             except:
                 pass
 
-        # 检查排队日期是否>=今天
+        # 检查排队日期是否>=昨天（昨天的排队也在明细表显示）
         if queue_date_str:
             try:
                 queue_date = datetime.strptime(queue_date_str, "%Y-%m-%d").date()
-                if queue_date >= today:
-                    has_future_queue_date = True
+                if queue_date >= yesterday:
+                    has_recent_queue_date = True
             except:
                 pass
 
-        # 如果期望发货日期已过期 且 排队日期不在未来（小于今天或为空），则不显示
-        if expected_date_passed and not has_future_queue_date:
+        # 如果期望发货日期已过期 且 排队日期不在昨天及以后（小于昨天或为空），则不显示
+        if expected_date_passed and not has_recent_queue_date:
             continue
 
         orders.append(order)
@@ -1754,6 +1817,8 @@ def get_orders():
                         return float(o.get("tonnage", 0) or 0)
                     except ValueError:
                         return 0
+                if sort_type == "submitTime":
+                    return o.get("submit_time", "") or ""
                 return ""
             orders = sorted(orders, key=sort_key)
 
@@ -1791,7 +1856,7 @@ def get_order(row_index):
         current_user = get_user_by_id(submitter_id) or {}
 
         # 直接读取指定行
-        grid_data = read_sheet_range(SHEET_ID, f"A{row_index}:L{row_index}")
+        grid_data = read_sheet_range(SHEET_ID, f"A{row_index}:N{row_index}")
         rows = grid_data.get("rows", [])
         if not rows:
             return jsonify({"success": False, "error": "订单不存在"})
@@ -1807,7 +1872,7 @@ def get_order(row_index):
                     return parse_cell_value(cv)
             return ""
 
-        row_data = [get_col(j) for j in range(12)]
+        row_data = [get_col(j) for j in range(14)]
 
         order = {
             "row_index": row_index,
@@ -1822,7 +1887,9 @@ def get_order(row_index):
             "serial_no": row_data[8],
             "last_entry": row_data[9],
             "submitter_id": row_data[10],
-            "submit_time": row_data[11]
+            "submit_time": row_data[11],
+            "first_tonnage": row_data[12],
+            "packaging": row_data[13]
         }
 
         # 检查权限
@@ -1847,17 +1914,20 @@ def update_order(row_index):
         queue_date = data.get('queue_date', '')
         submitter = data.get('submitter', '')
         submitter_id = data.get('submitter_id', '')
+        packaging = data.get('packaging', '')
 
         remark = f"{tonnage}{customer}"
         current_user = get_user_by_id(submitter_id) or {}
 
         # 读取原订单检查权限和吨位
-        grid_data = read_sheet_range(SHEET_ID, f"A{row_index}:L{row_index}")
+        grid_data = read_sheet_range(SHEET_ID, f"A{row_index}:N{row_index}")
         rows = grid_data.get("rows", [])
+        original_packaging = ""
         if rows:
             orig_values = [parse_cell_value(v.get("cellValue")) for v in rows[0].get("values", [])]
             original_tonnage = orig_values[1] if len(orig_values) > 1 else "0"
             original_queue_date = orig_values[5] if len(orig_values) > 5 else ""
+            original_packaging = orig_values[13] if len(orig_values) > 13 else ""
             original_order = {
                 "submitter": orig_values[6] if len(orig_values) > 6 else "",
                 "submitter_id": orig_values[10] if len(orig_values) > 10 else ""
@@ -1895,7 +1965,7 @@ def update_order(row_index):
         resp = write_order_row(
             write_idx, model, tonnage, customer, expected_date,
             calc_date_for_update, queue_date, submitter, remark, str(row_index), submitter_id,
-            get_beijing_time_str()
+            get_beijing_time_str(), packaging or original_packaging
         )
         result = resp.json()
 

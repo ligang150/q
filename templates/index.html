@@ -7,11 +7,11 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>销售排队系统</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=57">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=58">
     <script>
         // 版本检查：如果服务器版本更新，自动刷新页面
         (function(){
-            var serverVersion = 56;
+            var serverVersion = 57;
             var localVersion = parseInt(localStorage.getItem('app_version') || '0');
             if (localVersion && localVersion < serverVersion) {
                 localStorage.setItem('app_version', serverVersion);
@@ -93,6 +93,13 @@
                     <input type="text" id="queueDate" name="queueDate" required readonly disabled placeholder="请先选择型号和吨位计算可发货日期" onclick="showDatePicker(this)" style="cursor:not-allowed;background:#e9ecef;">
                 </div>
 
+                <div class="form-group">
+                    <label for="packaging">包装 <span class="required">*</span></label>
+                    <select id="packaging" name="packaging" required>
+                        <option value="">请选择包装</option>
+                    </select>
+                </div>
+
                 <div class="form-actions">
                     <button type="submit" class="btn-submit">提交排队</button>
                     <button type="button" class="btn-refresh" id="refreshCapacityBtn" onclick="refreshCapacityData()" title="刷新产能数据">
@@ -113,6 +120,7 @@
                 <input type="text" id="filterCustomer" placeholder="客户筛选..." oninput="filterOrders()">
                 <select id="sortSelect" onchange="sortOrders()">
                     <option value="">默认排序</option>
+                    <option value="submitTime">按提交时间排序</option>
                     <option value="model">按型号排序</option>
                     <option value="queueDate">按排队日期排序</option>
                     <option value="tonnage">按吨位排序</option>
@@ -197,6 +205,13 @@
                     <div class="date-hint" id="editDateHint"></div>
                 </div>
 
+                <div class="form-group">
+                    <label for="editPackaging">包装</label>
+                    <select id="editPackaging" name="editPackaging">
+                        <option value="">请选择包装</option>
+                    </select>
+                </div>
+
                 <div class="form-actions">
                     <button type="submit" class="btn-submit">保存修改</button>
                     <button type="button" class="btn-cancel" onclick="closeEditModal()">取消</button>
@@ -234,7 +249,7 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="{{ url_for('static', filename='js/app.v58.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.v59.js') }}"></script>
 </body>
 </html>
 
