@@ -23,6 +23,7 @@ FILE_ID = "DRnhDemRIS25mdnFF"        # 订单表 + 产能数据表（旧表格�
 SHEET_ID = "000007"                  # 自助排队表格
 MODEL_FILE_ID = "DRmxUY0RBQVJXRXpC"  # 牌号表格所在文件（新表格）
 MODEL_SHEET_ID = "fkayvi"            # 牌号表格
+PACKAGING_SHEET_ID = "qeyugg"        # 包装数据表格（tab=qeyugg）
 
 # 用户表配置（新表格）
 USER_FILE_ID = "DRmxUY0RBQVJXRXpC"
@@ -782,7 +783,7 @@ def index():
 @app.route('/api/models', methods=['GET'])
 @require_auth
 def get_models():
-    """获取型号列表（从牌号表格A列）"""
+    """获取型号列表（从牌号表格 A 列）"""
     try:
         now = time.time()
         if _models_cache["data"] is not None and (now - _models_cache["timestamp"]) < MODEL_CACHE_TTL:
@@ -798,13 +799,44 @@ def get_models():
                     text = parse_cell_value(cv)
                     if text:
                         models.append(text)
-        # 合并计算配置中的型号，避免牌号表漏填时下拉选项不全
         models = list(dict.fromkeys(models + list(MODEL_CONFIG.keys())))
         _models_cache["data"] = models
         _models_cache["timestamp"] = now
         return jsonify({"success": True, "models": models})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
+
+@app.route('/api/packaging', methods=['GET'])
+@require_auth
+def get_packaging():
+    """获取包装选项列表（从包装表格 A 列读取）"""
+    try:
+        now = time.time()
+        cache_key = "packaging_options"
+        if cache_key in _packaging_cache and (now - _packaging_cache["timestamp"]) < 300:
+            return jsonify({"success": True, "packaging": _packaging_cache["data"]})
+        
+        grid_data = read_sheet_range(PACKAGING_SHEET_ID, "A1:A100", file_id=MODEL_FILE_ID)
+        rows = grid_data.get("rows", [])
+        packaging_list = []
+        for row in rows:
+            for v in row.get("values", []):
+                cv = v.get("cellValue")
+                if cv:
+                    text = parse_cell_value(cv)
+                    if text and text.strip():
+                        packaging_list.append(text.strip())
+        
+        _packaging_cache["data"] = packaging_list
+        _packaging_cache["timestamp"] = now
+        return jsonify({"success": True, "packaging": packaging_list})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+# 包装数据缓存
+_packaging_cache = {"data": None, "timestamp": 0}
 
 
 # 计算结果缓存：避免重复计算

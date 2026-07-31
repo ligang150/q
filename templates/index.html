@@ -11,7 +11,7 @@
     <script>
         // 版本检查：如果服务器版本更新，自动刷新页面
         (function(){
-            var serverVersion = 46;
+            var serverVersion = 59;
             var localVersion = parseInt(localStorage.getItem('app_version') || '0');
             if (localVersion && localVersion < serverVersion) {
                 localStorage.setItem('app_version', serverVersion);
@@ -50,6 +50,7 @@
         <nav class="nav-tabs">
             <button class="tab-btn active" onclick="showTab('create', event)">订单排队</button>
             <button class="tab-btn" onclick="showTab('list', event)">排队明细</button>
+            <button class="tab-btn" onclick="showTab('history', event)">历史排队</button>
             <button class="tab-btn" onclick="showTab('feedback', event)">问题反馈</button>
             <button class="tab-btn admin-only" id="adminTabBtn" onclick="showTab('admin', event)" style="display:none;">管理员</button>
         </nav>
@@ -75,6 +76,15 @@
                     <div class="form-group form-col">
                         <label for="customer">客户 <span class="required">*</span></label>
                         <input type="text" id="customer" name="customer" required placeholder="客户" autocomplete="off">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group form-col">
+                        <label for="packaging">包装</label>
+                        <select id="packaging" name="packaging" autocomplete="off">
+                            <option value="">请选择</option>
+                        </select>
                     </div>
                 </div>
 
@@ -112,6 +122,7 @@
                     <option value="model">按型号排序</option>
                     <option value="queueDate">按排队日期排序</option>
                     <option value="tonnage">按吨位排序</option>
+                    <option value="submitTime">按提交时间排序</option>
                 </select>
             </div>
             
@@ -119,6 +130,26 @@
                 <div class="loading">加载中...</div>
             </div>
             <div id="pagination" class="pagination-container"></div>
+        </div>
+
+        <div id="historyTab" class="tab-content">
+            <div class="filter-bar">
+                <select id="historyFilterModel" onchange="filterHistoryOrders()">
+                    <option value="">全部型号</option>
+                </select>
+                <select id="historySortSelect" onchange="sortHistoryOrders()">
+                    <option value="">默认排序</option>
+                    <option value="submitTime">按提交时间排序</option>
+                    <option value="queueDate">按排队日期排序</option>
+                    <option value="model">按型号排序</option>
+                    <option value="tonnage">按吨位排序</option>
+                </select>
+            </div>
+            
+            <div id="historyOrdersList" class="orders-list">
+                <div class="loading">加载中...</div>
+            </div>
+            <div id="historyPagination" class="pagination-container"></div>
         </div>
 
         <div id="feedbackTab" class="tab-content">
@@ -230,7 +261,7 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="{{ url_for('static', filename='js/app.v46.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.v59.js') }}"></script>
 </body>
 </html>
 
