@@ -1039,22 +1039,15 @@ async function openEditModal(rowIndex) {
                 // 清除提示
                 document.getElementById('editDateHint').textContent = '';
                 document.getElementById('editDateHint').style.color = '';
-                // 如果可发货日期不是日期格式（如"请联系商务支持"），禁止编辑排队日期
+                // 排队日期输入框永远允许编辑：往后改随便改，往前改才校验可发货日期
                 const calcDate = order.calculated_date || '';
                 const isDate = calcDate && calcDate.match(/^\d{4}-\d{2}-\d{2}$/);
                 const editQueueDateInput = document.getElementById('editQueueDate');
-                if (!isDate && calcDate !== '') {
-                    editQueueDateInput.disabled = true;
-                    editQueueDateInput.style.background = '#e9ecef';
-                    editQueueDateInput.style.cursor = 'not-allowed';
-                    editQueueDateInput.title = '产能不足，请联系商务支持';
-                    editQueueDateInput.placeholder = '产能不足，请联系商务支持';
-                } else if (isDate) {
-                    editQueueDateInput.disabled = false;
-                    editQueueDateInput.style.background = '#fff';
-                    editQueueDateInput.style.cursor = 'pointer';
-                    editQueueDateInput.title = '';
-                }
+                editQueueDateInput.disabled = false;
+                editQueueDateInput.style.background = '#fff';
+                editQueueDateInput.style.cursor = 'pointer';
+                editQueueDateInput.title = '';
+                editQueueDateInput.placeholder = isDate ? '点击选择日期，须大于等于可发货日期' : '点击选择日期（往后改随便排，往前改需>=可发货日期）';
                 document.getElementById('editModal').classList.add('show');
                 calculateDateForEdit();
             }
@@ -1342,6 +1335,7 @@ async function calculateDateForEdit() {
             document.getElementById('editCalculatedDate').value = calcDate || '计算失败';
 
             const isDate = calcDate && calcDate.match(/\d{4}-\d{2}-\d{2}/);
+            // 排队日期输入框永远启用（往后改随便排，往前改才校验可发货日期）
             document.getElementById('editQueueDate').disabled = false;
             document.getElementById('editQueueDate').style.background = '#fff';
             document.getElementById('editQueueDate').style.cursor = 'pointer';
@@ -1351,11 +1345,10 @@ async function calculateDateForEdit() {
                 document.getElementById('editDateHint').textContent = '';
                 if (editSubmitBtn) { editSubmitBtn.disabled = false; editSubmitBtn.title = ''; }
             } else if (calcDate) {
-                document.getElementById('editQueueDate').disabled = true;
-                document.getElementById('editQueueDate').style.background = '#e9ecef';
-                document.getElementById('editQueueDate').style.cursor = 'not-allowed';
-                document.getElementById('editQueueDate').placeholder = '产能不足，请联系商务支持';
+                // 可发货日期无效（如"请联系商务支持"），但仍允许用户改排队日期（往后改不受限）
+                document.getElementById('editQueueDate').placeholder = '点击选择日期（往后改随便排，往前改需>=可发货日期）';
                 document.getElementById('editDateHint').textContent = calcDate;
+                document.getElementById('editDateHint').style.color = '#e74c3c';
                 if (editSubmitBtn) { editSubmitBtn.disabled = false; editSubmitBtn.title = ''; }
             }
             var currentQueueDate = document.getElementById('editQueueDate').value;
@@ -1376,31 +1369,61 @@ async function calculateDateForEdit() {
     }
 }
 
-// 监听修改弹窗中排队日期变更，如果改早了提示重新计算
+// 判断新日期是往前改（早于原排队日期）还是往后改（>=原排队日期）
+// 往后改：随便改，不校验可发货日期；往前改：必须 >= 重新计算的可发货日期
+function isMovingEarlier(newDateStr) {
+    const originalQueueDate = window._editOriginalQueueDate || '';
+    if (!originalQueueDate || !originalQueueDate.match(/^\d{4}-\d{2}-\d{2}$/)) return false;
+    if (!newDateStr || !newDateStr.match(/^\d{4}-\d{2}-\d{2}$/)) return false;
+    return new Date(newDateStr) < new Date(originalQueueDate);
+}
+
+// 监听修改弹窗中排队日期变更
 function setupEditQueueDateListener() {
     const editQueueDate = document.getElementById('editQueueDate');
     if (editQueueDate) {
         editQueueDate.addEventListener('change', function() {
-            const calcDate = document.getElementById('editCalculatedDate').value;
             const queueDate = this.value;
             const hint = document.getElementById('editDateHint');
-            if (calcDate && calcDate.match(/\d{4}-\d{2}-\d{2}/) && queueDate) {
-                if (new Date(queueDate) < new Date(calcDate)) {
-                    hint.textContent = '排队日期不能早于可发货日期（' + calcDate + '）';
+
+            if (!queueDate) {
+                hint.textContent = '';
+                hint.style.color = '';
+                return;
+            }
+
+            if (!isMovingEarlier(queueDate)) {
+                // 往后改（或原日期无效时不判断）：随便改，清空提示
+                hint.textContent = '';
+                hint.style.color = '';
+            } else {
+                // 往前改：校验 >= 可发货日期
+                const calcDate = document.getElementById('editCalculatedDate').value;
+                if (calcDate && calcDate.match(/\d{4}-\d{2}-\d{2}/)) {
+                    if (new Date(queueDate) < new Date(calcDate)) {
+                        hint.textContent = '排队日期不能早于可发货日期（' + calcDate + '）';
+                        hint.style.color = '#e74c3c';
+                    } else {
+                        hint.textContent = '';
+                        hint.style.color = '';
+                    }
+                } else if (calcDate && !calcDate.match(/\d{4}-\d{2}-\d{2}/) && calcDate !== '') {
+                    hint.textContent = calcDate;
                     hint.style.color = '#e74c3c';
                 } else {
                     hint.textContent = '';
                     hint.style.color = '';
                 }
-            } else if (calcDate && !calcDate.match(/\d{4}-\d{2}-\d{2}/) && calcDate !== '') {
-                hint.textContent = calcDate;
-                hint.style.color = '#e74c3c';
-            } else {
-                hint.textContent = '';
-                hint.style.color = '';
             }
         });
-        editQueueDate.addEventListener('change', debounce(calculateDateForEdit, 150));
+
+        // 只在往前改时才触发重新计算可发货日期
+        editQueueDate.addEventListener('change', debounce(function() {
+            const queueDate = document.getElementById('editQueueDate').value;
+            if (isMovingEarlier(queueDate)) {
+                calculateDateForEdit();
+            }
+        }, 150));
     }
 }
 
@@ -1410,17 +1433,23 @@ async function handleUpdateOrder(e) {
     const queueDate = document.getElementById('editQueueDate').value;
     const calcDate = document.getElementById('editCalculatedDate').value;
 
-    if (calcDate && !calcDate.match(/^\d{4}-\d{2}-\d{2}$/) && calcDate !== '计算失败' && calcDate !== '请联系商务支持') {
-        showToast('可发货日期：' + calcDate + '，无法保存修改', 'error');
+    // =========== 保存前统一校验（无论往前还是往后改都必须通过） ===========
+    // 1. 排队日期不能为空（没有日期时须先选择）
+    if (!queueDate || !queueDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        showToast('请先选择"输入发货日期排队"', 'error');
         return;
     }
-
-    if (calcDate && calcDate.match(/\d{4}-\d{2}-\d{2}/) && queueDate) {
-        if (new Date(queueDate) < new Date(calcDate)) {
-            showToast('排队日期不能早于可发货日期（' + calcDate + '）', 'error');
-            return;
-        }
+    // 2. 可发货日期必须是有效日期格式（须先计算出可发货日期，不能是"请联系商务支持"/"计算失败"）
+    if (!calcDate || !calcDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        showToast('可发货日期无效，请等待计算完成或联系商务支持', 'error');
+        return;
     }
+    // 3. 排队日期 >= 可发货日期
+    if (new Date(queueDate) < new Date(calcDate)) {
+        showToast('排队日期不能早于可发货日期（' + calcDate + '）', 'error');
+        return;
+    }
+    // ========================================================================
 
     const orderData = {
         model: document.getElementById('editModel').value,
