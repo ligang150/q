@@ -57,7 +57,7 @@ ADMIN_EMPLOYEE_ID = "20150465"
 REFRESH_CAPACITY_COOLDOWN_SECONDS = 60  # 最小间隔60秒
 _last_refresh_capacity_time = 0
 _refresh_capacity_lock = threading.Lock()
-ADMIN_KEYS = ["TENCENT_ACCESS_TOKEN", "RENDER_API_KEY", "GITHUB_TOKEN"]
+ADMIN_KEYS = ["TENCENT_ACCESS_TOKEN"]
 RENDER_API_KEY_BOOTSTRAP = os.environ.get("RENDER_API_KEY", "")
 RENDER_SERVICE_ID = os.environ.get("RENDER_SERVICE_ID", "srv-d8l6eet7vvec73evlu7g")
 GITHUB_TOKEN_BOOTSTRAP = os.environ.get("GITHUB_TOKEN", "")
@@ -1452,6 +1452,52 @@ def create_order():
         return jsonify({"success": False, "error": str(e)})
 
 
+DEFAULT_ORDERS_READ_LIMIT = 3000
+MIN_ORDERS_READ_LIMIT = 500
+MAX_ORDERS_READ_LIMIT = 20000
+_orders_read_limit = {"value": None}
+
+
+def get_orders_read_limit():
+    """列表读取最大行号：管理员设置优先，其次环境变量，默认 3000。"""
+    if _orders_read_limit["value"] is not None:
+        return _orders_read_limit["value"]
+    raw = str(os.environ.get("ORDERS_READ_LIMIT", "") or "").strip()
+    try:
+        n = int(raw)
+        if MIN_ORDERS_READ_LIMIT <= n <= MAX_ORDERS_READ_LIMIT:
+            _orders_read_limit["value"] = n
+            return n
+    except (TypeError, ValueError):
+        pass
+    _orders_read_limit["value"] = DEFAULT_ORDERS_READ_LIMIT
+    return DEFAULT_ORDERS_READ_LIMIT
+
+
+def persist_orders_read_limit(value):
+    """立即生效；尽量写入 Render 环境变量，不触发额外部署。"""
+    n = int(value)
+    _orders_read_limit["value"] = n
+    render_key = get_admin_secret("RENDER_API_KEY") or RENDER_API_KEY_BOOTSTRAP
+    if not render_key or not RENDER_SERVICE_ID:
+        return False
+    try:
+        resp = HTTP.put(
+            f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars/ORDERS_READ_LIMIT",
+            headers={
+                "Authorization": f"Bearer {render_key}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            json={"value": str(n)},
+            timeout=_HTTP_TIMEOUT,
+        )
+        return resp.status_code in (200, 201)
+    except Exception as e:
+        print(f"[WARN] persist_orders_read_limit: {e}", flush=True)
+        return False
+
+
 # 全局缓存：原始订单数据（不过滤权限和日期）
 _orders_cache = {"data": None, "timestamp": 0}
 # 全局缓存：过滤+排序后的结果（按用户和view_mode缓存）
@@ -1494,9 +1540,10 @@ def fetch_all_orders_raw():
     last_data_row = 1
     scan_ranges = []
     batch_size = 500
-    for offset in range(0, 2000, batch_size):
+    scan_limit = get_orders_read_limit()
+    for offset in range(0, scan_limit, batch_size):
         start = offset + 1
-        end = offset + batch_size
+        end = min(offset + batch_size, scan_limit)
         scan_ranges.append((start, end))
 
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -2176,7 +2223,39 @@ def validate_admin_key(key, value):
 @require_auth
 @require_ligang_admin
 def admin_status():
-    return jsonify({"success": True, "items": [summarize_admin_key(k) for k in ADMIN_KEYS]})
+    return jsonify({
+        "success": True,
+        "items": [summarize_admin_key(k) for k in ADMIN_KEYS],
+        "orders_read_limit": get_orders_read_limit(),
+        "orders_read_limit_min": MIN_ORDERS_READ_LIMIT,
+        "orders_read_limit_max": MAX_ORDERS_READ_LIMIT,
+        "orders_read_limit_default": DEFAULT_ORDERS_READ_LIMIT,
+    })
+
+
+@app.route('/api/admin/orders-read-limit', methods=['POST'])
+@require_auth
+@require_ligang_admin
+def admin_set_orders_read_limit():
+    data = request.get_json(silent=True) or {}
+    raw = str(data.get("value") or "").strip()
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "读取上限必须是整数"}), 400
+    if n < MIN_ORDERS_READ_LIMIT or n > MAX_ORDERS_READ_LIMIT:
+        return jsonify({
+            "success": False,
+            "error": f"读取上限需在 {MIN_ORDERS_READ_LIMIT}–{MAX_ORDERS_READ_LIMIT} 之间"
+        }), 400
+    persisted = persist_orders_read_limit(n)
+    clear_order_caches()
+    return jsonify({
+        "success": True,
+        "orders_read_limit": n,
+        "persisted": persisted,
+        "message": "读取上限已生效" + ("，并已写入环境变量" if persisted else "（当前实例立即生效）"),
+    })
 
 
 @app.route('/api/admin/validate', methods=['POST'])

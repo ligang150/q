@@ -7,11 +7,11 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>销售排队系统</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=59">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=60">
     <script>
         // 版本检查：如果服务器版本更新，自动刷新页面
         (function(){
-            var serverVersion = 57;
+            var serverVersion = 60;
             var localVersion = parseInt(localStorage.getItem('app_version') || '0');
             if (localVersion && localVersion < serverVersion) {
                 localStorage.setItem('app_version', serverVersion);
@@ -154,13 +154,26 @@
 
         <div id="adminTab" class="tab-content">
             <div class="admin-card">
+                <h2 class="admin-title">读取上限</h2>
+                <p class="admin-desc">「我的排队 / 全部排队」扫描腾讯表的最大行号。当前默认 3000。保存后当前服务立即生效。</p>
+                <div class="admin-item">
+                    <div class="admin-item-head">
+                        <span class="admin-item-name">订单读取最大行号</span>
+                        <span id="ordersReadLimitStatus" class="admin-item-status ok">当前 --</span>
+                    </div>
+                    <div class="admin-item-row">
+                        <input type="number" id="ordersReadLimitInput" min="500" max="20000" step="100" placeholder="例如 3000">
+                        <button type="button" class="admin-btn-update" onclick="onSaveOrdersReadLimit()">保存</button>
+                    </div>
+                    <div id="ordersReadLimitMsg" class="admin-item-msg"></div>
+                </div>
+            </div>
+            <div class="admin-card" style="margin-top:16px;">
                 <h2 class="admin-title">管理员凭证管理</h2>
-                <p class="admin-desc">仅李刚可见。主服务管理腾讯、Render、GitHub 三项凭证，保存到 Render 环境变量；输入框不回显，日志只显示前 4 位 + 后 4 位，保存后会触发重新部署。</p>
+                <p class="admin-desc">仅李刚可见。管理腾讯 access_token，保存到 Render 环境变量；输入框不回显，日志只显示前 4 位 + 后 4 位，保存后会触发重新部署。</p>
                 <div id="adminItems" class="admin-items"></div>
                 <div id="adminLog" class="admin-log"></div>
             </div>
-
-
         </div>
     </div>
 
@@ -249,7 +262,7 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="{{ url_for('static', filename='js/app.v59.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.v60.js') }}"></script>
 </body>
 </html>
 

@@ -1071,7 +1071,8 @@ body {
 .admin-item-row {
     display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap;
 }
-.admin-item-row input[type="password"] {
+.admin-item-row input[type="password"],
+.admin-item-row input[type="number"] {
     flex: 1 1 220px;
     min-width: 0;
     padding: 8px 10px;
